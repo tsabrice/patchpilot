@@ -11,6 +11,7 @@
 !README.md
 !PRD.md
 !docs/ARCHITECTURE_REVIEW.md
+!.github/pull_request_template.md
 
 # ── Java / Maven ─────────────────────────────────────────────────────────────
 target/
