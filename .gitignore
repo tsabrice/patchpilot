@@ -1,0 +1,38 @@
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# ── Markdown (whitelist approach) ────────────────────────────────────────────
+*.md
+!README.md
+!PRD.md
+!docs/ARCHITECTURE_REVIEW.md
+
+# ── Java / Maven ─────────────────────────────────────────────────────────────
+target/
+*.class
+*.jar
+*.war
+.mvn/wrapper/maven-wrapper.jar
+
+# ── IDE ──────────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# ── Node / Angular ────────────────────────────────────────────────────────────
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.angular/
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
