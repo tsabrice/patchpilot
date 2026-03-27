@@ -247,7 +247,10 @@ services:
   #
   # Prerequisites before uncommenting:
   #   1. ai-agent/ Spring Boot project built and Dockerfile written
-  #   2. .env populated with CLAUDE_API_KEY, GITHUB_TOKEN, and related vars
+  #   2. .env populated with GITHUB_TOKEN and related vars
+  #   3a. CLAUDE_MODE=max (default): claude CLI installed in the image +
+  #       ~/.claude/ mounted below for Max plan session credentials
+  #   3b. CLAUDE_MODE=api: set CLAUDE_API_KEY in .env instead
   # --------------------------------------------------------------------------
   # ai-agent:
   #   build:
@@ -262,7 +265,8 @@ services:
   #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-patchpilot}
   #     SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-patchpilot}
   #     SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-  #     CLAUDE_API_KEY: ${CLAUDE_API_KEY}
+  #     CLAUDE_MODE: ${CLAUDE_MODE:-max}
+  #     CLAUDE_API_KEY: ${CLAUDE_API_KEY}   # only required when CLAUDE_MODE=api
   #     GITHUB_TOKEN: ${GITHUB_TOKEN}
   #     GITHUB_OWNER: ${GITHUB_OWNER}
   #     GITHUB_REPO: ${GITHUB_REPO}
@@ -271,6 +275,9 @@ services:
   #     SONARQUBE_WEBHOOK_SECRET: ${SONARQUBE_WEBHOOK_SECRET}
   #     AUTH0_DOMAIN: ${AUTH0_DOMAIN}
   #     AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+  #   volumes:
+  #     # Mount Claude Max plan credentials (only needed when CLAUDE_MODE=max)
+  #     - ${HOME}/.claude:/root/.claude:ro
   #   ports:
   #     - "${AI_AGENT_PORT:-8081}:8081"
   #   networks:
