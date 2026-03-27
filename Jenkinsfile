@@ -82,17 +82,13 @@ pipeline {
         //   POST http://ai-agent:8081/api/webhooks/sonarqube
         // The AI Agent processes findings asynchronously — no need to wait here.
         //
-        // sonar.branch.name is passed so the SonarQube UI shows which branch
-        // the findings came from. BRANCH_NAME is set automatically by Jenkins
-        // for multibranch pipelines; falls back to 'main' for freestyle jobs.
+        // Note: sonar.branch.name requires SonarQube Developer Edition or above.
+        // Community Edition (used here) analyzes a single branch only.
         // --------------------------------------------------------------------
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('SonarQube') {
-                    sh """
-                        mvn -f demo-app/pom.xml sonar:sonar -B \
-                            -Dsonar.branch.name=${env.BRANCH_NAME ?: 'main'}
-                    """
+                    sh 'mvn -f demo-app/pom.xml sonar:sonar -B'
                 }
             }
         }
