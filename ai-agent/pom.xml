@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        ai-agent — the core PatchPilot service.
+        Receives SonarQube webhooks, calls Claude API, opens GitHub PRs,
+        persists everything to PostgreSQL, and serves the Angular dashboard API.
+    -->
+
+    <parent>
+        <groupId>ca.uqam</groupId>
+        <artifactId>patchpilot-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>ai-agent</artifactId>
+    <name>PatchPilot AI Agent</name>
+    <description>Webhook receiver, Claude API client, GitHub PR creator</description>
+
+    <dependencies>
+
+        <!-- ── Web layer ──────────────────────────────────────────────────── -->
+
+        <!--
+            spring-boot-starter-web: REST controllers, embedded Tomcat,
+            Jackson JSON serialisation, RestClient for outbound HTTP calls.
+            This one dependency brings in everything needed for the webhook
+            controller and all three API clients (SonarQube, GitHub, Claude).
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ── Security ───────────────────────────────────────────────────── -->
+
+        <!--
+            spring-boot-starter-security: enables Spring Security.
+            On its own it locks down all endpoints with basic auth.
+            Combined with oauth2-resource-server below, it validates Auth0 JWTs.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!--
+            oauth2-resource-server: validates JWT tokens from Auth0.
+            Spring auto-fetches Auth0's JWKS (public keys) and verifies
+            every incoming JWT signature and expiry automatically.
+            Config: spring.security.oauth2.resourceserver.jwt.issuer-uri
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+
+        <!-- ── Persistence ────────────────────────────────────────────────── -->
+
+        <!--
+            spring-boot-starter-data-jpa: Spring Data JPA + Hibernate.
+            Lets us define JPA entities and JpaRepository interfaces.
+            ddl-auto=validate means Hibernate reads the schema but NEVER
+            creates or modifies it — Flyway owns the schema.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- PostgreSQL JDBC driver — runtime only, not needed at compile time -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!--
+            Flyway core + PostgreSQL dialect.
+            On startup, Flyway scans db/migration/, compares checksums against
+            the flyway_schema_history table, and runs any pending V*.sql files.
+            V1__create_schema.sql runs on first startup automatically.
+        -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- ── Observability ──────────────────────────────────────────────── -->
+
+        <!--
+            spring-boot-starter-actuator: exposes /actuator/health and
+            /actuator/prometheus endpoints. Prometheus scrapes the latter.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!--
+            micrometer-registry-prometheus: formats metrics in Prometheus
+            exposition format at /actuator/prometheus.
+            Micrometer is the vendor-neutral metrics facade — swapping this
+            dependency to micrometer-registry-datadog would switch to Datadog
+            with zero code changes.
+        -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ── Fault tolerance ────────────────────────────────────────────── -->
+
+        <!--
+            resilience4j-spring-boot3: circuit breaker + rate limiter + retry.
+            Applied to Claude API and GitHub API clients via @CircuitBreaker
+            annotation. Circuit state is exposed as a Micrometer metric —
+            visible in Grafana. See CLAUDE.md for configuration and usage.
+        -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+        </dependency>
+
+        <!-- ── Testing ────────────────────────────────────────────────────── -->
+
+        <!--
+            spring-boot-starter-test: JUnit 5, Mockito, MockMvc, AssertJ.
+            scope=test means it is not included in the final JAR.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            testcontainers postgresql: spins up a real PostgreSQL Docker container
+            during integration tests. Flyway runs against it automatically.
+            This is why we do NOT mock the DB layer — real DB = no surprises.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            wiremock-standalone: mock HTTP server for integration tests.
+            Used to simulate SonarQube API, GitHub API, and Claude API responses
+            without hitting real services.
+        -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            spring-security-test: provides SecurityMockMvcRequestPostProcessors
+            to inject mock JWTs in MockMvc tests without a real Auth0 token.
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+
+            <!--
+                Spring Boot Maven Plugin — packages the agent as an executable JAR.
+                Also used by the Jenkinsfile Docker build stage.
+                repackage goal wraps the fat JAR so it's runnable with: java -jar
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!-- SpotBugs — inherited config from parent pluginManagement -->
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+            </plugin>
+
+            <!-- OWASP Dependency Check — inherited config from parent pluginManagement -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+            </plugin>
+
+        </plugins>
+    </build>
+
+</project>

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        PARENT POM — root of the PatchPilot multi-module build.
+        This file owns ALL dependency and plugin versions.
+        Neither demo-app nor ai-agent declares versions — they inherit them here.
+        This prevents version drift between modules.
+    -->
+
+    <!-- Inherit Spring Boot's curated BOM for core dependency versions -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>ca.uqam</groupId>
+    <artifactId>patchpilot-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>PatchPilot Parent</name>
+    <description>AI-powered DevSecOps pipeline — parent POM</description>
+
+    <!-- Child modules — Maven builds them in this order -->
+    <modules>
+        <module>demo-app</module>
+        <module>ai-agent</module>
+    </modules>
+
+    <properties>
+        <!-- Java version — must match the JDK installed on the build machine -->
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!--
+            Dependency versions not managed by Spring Boot's BOM.
+            Centralised here so a version bump is one line change.
+        -->
+        <testcontainers.version>1.20.4</testcontainers.version>
+        <wiremock.version>3.9.2</wiremock.version>
+        <resilience4j.version>2.2.0</resilience4j.version>
+        <spotbugs-plugin.version>4.8.6.4</spotbugs-plugin.version>
+        <owasp-plugin.version>10.0.4</owasp-plugin.version>
+    </properties>
+
+    <!--
+        dependencyManagement: pins versions for ALL modules.
+        A child module that declares a dependency listed here does NOT need
+        to specify a version — it inherits the one pinned below.
+    -->
+    <dependencyManagement>
+        <dependencies>
+
+            <!-- Testcontainers BOM — imports versions for all testcontainers modules -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Resilience4j BOM -->
+            <dependency>
+                <groupId>io.github.resilience4j</groupId>
+                <artifactId>resilience4j-bom</artifactId>
+                <version>${resilience4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- WireMock — mock HTTP server for integration tests -->
+            <dependency>
+                <groupId>org.wiremock</groupId>
+                <artifactId>wiremock-standalone</artifactId>
+                <version>${wiremock.version}</version>
+                <scope>test</scope>
+            </dependency>
+
+        </dependencies>
+    </dependencyManagement>
+
+    <!--
+        pluginManagement: configures plugins for all modules.
+        A child module that declares the plugin does NOT need to repeat config.
+    -->
+    <build>
+        <pluginManagement>
+            <plugins>
+
+                <!--
+                    SpotBugs — static analysis on compiled bytecode.
+                    Catches: null pointer risks, bad API usage, threading bugs.
+                    Fails the build on any Medium or higher severity finding.
+                -->
+                <plugin>
+                    <groupId>com.github.spotbugs</groupId>
+                    <artifactId>spotbugs-maven-plugin</artifactId>
+                    <version>${spotbugs-plugin.version}</version>
+                    <configuration>
+                        <effort>Max</effort>
+                        <threshold>Medium</threshold>
+                        <failOnError>true</failOnError>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!--
+                    OWASP Dependency Check — scans JAR dependencies against
+                    the National Vulnerability Database (NVD).
+                    Fails the build if any dependency has a CVE score >= 7
+                    (HIGH or CRITICAL). For a DevSecOps project, this is
+                    non-negotiable — we cannot ship with known CVEs.
+                    suppressionFile handles known false positives.
+                -->
+                <plugin>
+                    <groupId>org.owasp</groupId>
+                    <artifactId>dependency-check-maven</artifactId>
+                    <version>${owasp-plugin.version}</version>
+                    <configuration>
+                        <failBuildOnCVSS>7</failBuildOnCVSS>
+                        <suppressionFile>${project.basedir}/../owasp-suppressions.xml</suppressionFile>
+                        <formats>HTML,JSON</formats>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+
+            </plugins>
+        </pluginManagement>
+    </build>
+
+</project>
