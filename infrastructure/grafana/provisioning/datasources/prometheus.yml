@@ -1,8 +1,8 @@
 # ============================================================================
 # Grafana datasource provisioning
 #
-# This file is read by Grafana on startup. It automatically registers
-# Prometheus as a data source so you don't have to click through the UI.
+# This file is read by Grafana on startup and automatically registers
+# Prometheus as a data source — no manual UI configuration required.
 #
 # How Grafana provisioning works:
 #   Grafana watches /etc/grafana/provisioning/ on startup and processes

@@ -25,9 +25,9 @@ services:
   # --------------------------------------------------------------------------
   # PostgreSQL 16 — primary datastore for the AI Agent
   #
-  # Why PostgreSQL? ACID guarantees matter here: we do idempotent INSERTs
-  # with ON CONFLICT DO NOTHING which requires real transaction isolation.
-  # Alpine variant keeps the image small (~80 MB vs ~400 MB for full image).
+  # Why PostgreSQL? ACID guarantees matter here: the pipeline uses idempotent
+  # INSERTs with ON CONFLICT DO NOTHING which requires real transaction isolation.
+  # Alpine variant keeps the image small (~80 MB vs ~400 MB for the full image).
   # --------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
@@ -56,15 +56,12 @@ services:
   # --------------------------------------------------------------------------
   # Jenkins LTS — CI/CD orchestrator
   #
-  # Why Jenkins? It's the standard at every Montreal bank (Desjardins, BNC,
-  # Intact). Knowing Jenkins Pipelines (Groovy DSL) appears on every JD.
-  #
   # /var/run/docker.sock mount: lets Jenkins pipelines run Docker commands
   # (e.g., build a Docker image as part of the pipeline). This is the standard
   # "Docker-in-Docker without DinD" pattern.
   #
-  # JAVA_OPTS: disables the setup wizard so Jenkins starts without a manual
-  # unlock step. The wizard is fine for production but annoying for demos.
+  # JAVA_OPTS: disables the setup wizard so Jenkins starts without requiring
+  # a manual unlock step.
   # --------------------------------------------------------------------------
   jenkins:
     image: jenkins/jenkins:lts-jdk21
@@ -76,8 +73,7 @@ services:
         -Dhudson.model.DirectoryBrowserSupport.CSP=
     ports:
       - "${JENKINS_PORT:-8080}:8080"
-      # Port 50000 is the Jenkins agent (JNLP) port — not used in this project
-      # but good practice to expose it so you can add build agents later
+      # Port 50000 is the Jenkins agent (JNLP) port — exposed for future build agents
       - "50000:50000"
     volumes:
       - jenkins-data:/var/jenkins_home
@@ -96,18 +92,18 @@ services:
   # --------------------------------------------------------------------------
   # SonarQube Community Edition — static analysis engine
   #
-  # Why Community Edition (CE)? It's free and supports all the OWASP/security
-  # rules we need. The only CE limitation is no branch analysis — we use the
-  # main branch only, which is fine for this demo.
+  # Why Community Edition (CE)? It is free and supports all OWASP/security
+  # rules required for this pipeline. The only CE limitation is no branch
+  # analysis — the main branch is used exclusively here.
   #
   # SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: disables the Elasticsearch bootstrap
-  # check that would fail because we can't set vm.max_map_count inside a
-  # Docker container. The check is still done on the HOST — see Prerequisites.
+  # check that fails when vm.max_map_count cannot be set inside a container.
+  # The check must still be satisfied on the host — see Prerequisites above.
   #
   # Memory tuning:
   #   SONAR_WEB_JAVAOPTS — the SonarQube web process JVM
   #   SONAR_CE_JAVAOPTS  — the Compute Engine (analysis) process JVM
-  # Both are kept small so SonarQube doesn't eat 2 GB RAM on your laptop.
+  # Both are capped to keep the total footprint under 1 GB on a developer machine.
   # --------------------------------------------------------------------------
   sonarqube:
     image: sonarqube:community
@@ -143,20 +139,23 @@ services:
   # --------------------------------------------------------------------------
   # Artifactory OSS — artifact repository / Maven registry
   #
-  # Why Artifactory? It's the standard artifact registry at Montreal banks.
-  # Jenkins will deploy JARs here with `mvn deploy` using the Artifactory plugin.
-  # The OSS version supports Maven, npm, Docker — everything we need.
+  # Jenkins deploys JARs here via `mvn deploy`. The OSS edition supports
+  # Maven, npm, and Docker repositories.
   #
   # First-run initialization takes ~60–90 seconds.
+  #
+  # Version pinned to 7.55.14: the `latest` tag (7.7x+) introduced an internal
+  # "Access" microservice that fails to start under Docker without extra config.
+  # 7.55.14 is the last widely-used stable release without that dependency.
   # --------------------------------------------------------------------------
   artifactory:
-    image: releases-docker.jfrog.io/jfrog/artifactory-oss:latest
+    image: releases-docker.jfrog.io/jfrog/artifactory-oss:7.55.14
     container_name: patchpilot-artifactory
     restart: unless-stopped
     environment:
       JF_SHARED_DATABASE_TYPE: derby
-      # Derby (embedded DB) is fine for a local dev instance.
-      # Do NOT use this in production — use PostgreSQL for Artifactory as well.
+      # Derby (embedded DB) is suitable for a local development instance.
+      # For production deployments, use a dedicated PostgreSQL database.
     ports:
       - "${ARTIFACTORY_PORT:-8082}:8082"
     volumes:
@@ -173,19 +172,18 @@ services:
   # --------------------------------------------------------------------------
   # Prometheus — metrics scraper
   #
-  # Why Prometheus? It's the CNCF-standard metrics system. The AI Agent will
-  # expose /actuator/prometheus (via Micrometer), and Prometheus scrapes it
-  # every 15 seconds. Grafana then queries Prometheus to render dashboards.
+  # The AI Agent exposes /actuator/prometheus (via Micrometer); Prometheus
+  # scrapes it every 15 seconds. Grafana queries Prometheus to render dashboards.
   #
-  # Config file is bind-mounted from infrastructure/prometheus/prometheus.yml
-  # so you can edit scrape targets without rebuilding the container.
+  # The config file is bind-mounted from infrastructure/prometheus/prometheus.yml
+  # so scrape targets can be updated without rebuilding the container.
   # --------------------------------------------------------------------------
   prometheus:
     image: prom/prometheus:latest
     container_name: patchpilot-prometheus
     restart: unless-stopped
     command:
-      # --web.enable-lifecycle: lets you reload config without restarting
+      # --web.enable-lifecycle: allows config reload via POST /-/reload
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--web.enable-lifecycle"
@@ -193,7 +191,7 @@ services:
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
-      # Bind-mount: you can edit this file and POST /-/reload to apply changes
+      # Bind-mount: edit this file and POST /-/reload to apply changes live
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     networks:
@@ -208,12 +206,9 @@ services:
   # --------------------------------------------------------------------------
   # Grafana — metrics visualization
   #
-  # Why Grafana? It connects to Prometheus as a data source and renders the
-  # dashboards you'll show in the demo. Grafana OSS is 100% free.
-  #
-  # GF_SECURITY_ADMIN_PASSWORD: set a non-default password for the demo.
-  # GF_AUTH_ANONYMOUS_ENABLED: "true" lets the interviewer view dashboards
-  # without logging in — useful for a recorded demo.
+  # Connects to Prometheus as a data source and renders the pipeline dashboards.
+  # GF_AUTH_ANONYMOUS_ENABLED allows read-only dashboard access without login,
+  # which is useful for sharing dashboards without distributing credentials.
   # --------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:latest
@@ -227,7 +222,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      # Disable telemetry — no need to send usage data to Grafana Labs
+      # Disable telemetry
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
     ports:
@@ -248,12 +243,11 @@ services:
       start_period: 30s
 
   # --------------------------------------------------------------------------
-  # AI Agent — Week 2 (commented out until the Spring Boot app is written)
+  # AI Agent — uncomment when the Spring Boot application is ready (Week 2)
   #
-  # Uncomment this block at the start of Week 2 Day 8 after:
-  #   1. ai-agent/ Spring Boot project is created
-  #   2. ai-agent/Dockerfile is written
-  #   3. .env has CLAUDE_API_KEY, GITHUB_TOKEN, etc.
+  # Prerequisites before uncommenting:
+  #   1. ai-agent/ Spring Boot project built and Dockerfile written
+  #   2. .env populated with CLAUDE_API_KEY, GITHUB_TOKEN, and related vars
   # --------------------------------------------------------------------------
   # ai-agent:
   #   build:
@@ -290,7 +284,7 @@ services:
 
 # ============================================================================
 # Named volumes — data persists across `docker compose down`
-# Destroy with: docker compose down -v  (nuclear option — fresh start)
+# To destroy all data and start fresh: docker compose down -v
 # ============================================================================
 volumes:
   postgres-data:
@@ -308,7 +302,8 @@ volumes:
 # Why a custom network instead of the default?
 # 1. Service discovery: containers reach each other by service name (e.g.,
 #    http://sonarqube:9000) — this only works on user-defined bridge networks.
-# 2. Isolation: this network is invisible to other Docker projects on your machine.
+# 2. Isolation: this network is separate from other Docker Compose projects
+#    running on the same host.
 # ============================================================================
 networks:
   patchpilot-net:
