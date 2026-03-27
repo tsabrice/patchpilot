@@ -1,0 +1,315 @@
+# ============================================================================
+# PatchPilot — Docker Compose
+#
+# Starts all 7 services with a single command: docker compose up -d
+#
+# Prerequisites:
+#   - Copy .env.example → .env and fill in real values
+#   - First run pulls ~3 GB of images — allow 5–10 minutes
+#   - SonarQube requires vm.max_map_count=262144 on the host:
+#       sudo sysctl -w vm.max_map_count=262144
+#     Make it permanent: echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
+#
+# Service URLs (after startup):
+#   Jenkins      → http://localhost:8080
+#   SonarQube    → http://localhost:9000   (admin / admin on first run)
+#   Artifactory  → http://localhost:8082
+#   Prometheus   → http://localhost:9090
+#   Grafana      → http://localhost:3000   (admin / admin on first run)
+#   PostgreSQL   → localhost:5432
+#   AI Agent     → http://localhost:8081   (added in Week 2)
+# ============================================================================
+
+services:
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL 16 — primary datastore for the AI Agent
+  #
+  # Why PostgreSQL? ACID guarantees matter here: we do idempotent INSERTs
+  # with ON CONFLICT DO NOTHING which requires real transaction isolation.
+  # Alpine variant keeps the image small (~80 MB vs ~400 MB for full image).
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: patchpilot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-patchpilot}
+      POSTGRES_USER: ${POSTGRES_USER:-patchpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      # Format: "host:container" — host port configurable via .env
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Named volume: data persists across restarts; destroyed only with -v flag
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - patchpilot-net
+    healthcheck:
+      # pg_isready exits 0 only when PostgreSQL is accepting connections
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-patchpilot} -d ${POSTGRES_DB:-patchpilot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # --------------------------------------------------------------------------
+  # Jenkins LTS — CI/CD orchestrator
+  #
+  # Why Jenkins? It's the standard at every Montreal bank (Desjardins, BNC,
+  # Intact). Knowing Jenkins Pipelines (Groovy DSL) appears on every JD.
+  #
+  # /var/run/docker.sock mount: lets Jenkins pipelines run Docker commands
+  # (e.g., build a Docker image as part of the pipeline). This is the standard
+  # "Docker-in-Docker without DinD" pattern.
+  #
+  # JAVA_OPTS: disables the setup wizard so Jenkins starts without a manual
+  # unlock step. The wizard is fine for production but annoying for demos.
+  # --------------------------------------------------------------------------
+  jenkins:
+    image: jenkins/jenkins:lts-jdk21
+    container_name: patchpilot-jenkins
+    restart: unless-stopped
+    environment:
+      JAVA_OPTS: >-
+        -Djenkins.install.runSetupWizard=false
+        -Dhudson.model.DirectoryBrowserSupport.CSP=
+    ports:
+      - "${JENKINS_PORT:-8080}:8080"
+      # Port 50000 is the Jenkins agent (JNLP) port — not used in this project
+      # but good practice to expose it so you can add build agents later
+      - "50000:50000"
+    volumes:
+      - jenkins-data:/var/jenkins_home
+      # Mount Docker socket so Jenkins can run Docker commands inside pipelines
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - patchpilot-net
+    healthcheck:
+      # Jenkins exposes /login even before full startup; returns 200 when ready
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/login || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # --------------------------------------------------------------------------
+  # SonarQube Community Edition — static analysis engine
+  #
+  # Why Community Edition (CE)? It's free and supports all the OWASP/security
+  # rules we need. The only CE limitation is no branch analysis — we use the
+  # main branch only, which is fine for this demo.
+  #
+  # SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: disables the Elasticsearch bootstrap
+  # check that would fail because we can't set vm.max_map_count inside a
+  # Docker container. The check is still done on the HOST — see Prerequisites.
+  #
+  # Memory tuning:
+  #   SONAR_WEB_JAVAOPTS — the SonarQube web process JVM
+  #   SONAR_CE_JAVAOPTS  — the Compute Engine (analysis) process JVM
+  # Both are kept small so SonarQube doesn't eat 2 GB RAM on your laptop.
+  # --------------------------------------------------------------------------
+  sonarqube:
+    image: sonarqube:community
+    container_name: patchpilot-sonarqube
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-patchpilot}
+      SONAR_JDBC_USERNAME: ${POSTGRES_USER:-patchpilot}
+      SONAR_JDBC_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+      SONAR_WEB_JAVAOPTS: -Xmx256m -Xms128m
+      SONAR_CE_JAVAOPTS: -Xmx256m -Xms128m
+    ports:
+      - "${SONARQUBE_PORT:-9000}:9000"
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube-extensions:/opt/sonarqube/extensions
+      - sonarqube-logs:/opt/sonarqube/logs
+    networks:
+      - patchpilot-net
+    healthcheck:
+      # SonarQube's health endpoint returns {"health":"GREEN"} when fully ready.
+      # Takes ~60 seconds on first run (DB schema migration + ES index warm-up).
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  # --------------------------------------------------------------------------
+  # Artifactory OSS — artifact repository / Maven registry
+  #
+  # Why Artifactory? It's the standard artifact registry at Montreal banks.
+  # Jenkins will deploy JARs here with `mvn deploy` using the Artifactory plugin.
+  # The OSS version supports Maven, npm, Docker — everything we need.
+  #
+  # First-run initialization takes ~60–90 seconds.
+  # --------------------------------------------------------------------------
+  artifactory:
+    image: releases-docker.jfrog.io/jfrog/artifactory-oss:latest
+    container_name: patchpilot-artifactory
+    restart: unless-stopped
+    environment:
+      JF_SHARED_DATABASE_TYPE: derby
+      # Derby (embedded DB) is fine for a local dev instance.
+      # Do NOT use this in production — use PostgreSQL for Artifactory as well.
+    ports:
+      - "${ARTIFACTORY_PORT:-8082}:8082"
+    volumes:
+      - artifactory-data:/var/opt/jfrog/artifactory
+    networks:
+      - patchpilot-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8082/artifactory/api/system/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  # --------------------------------------------------------------------------
+  # Prometheus — metrics scraper
+  #
+  # Why Prometheus? It's the CNCF-standard metrics system. The AI Agent will
+  # expose /actuator/prometheus (via Micrometer), and Prometheus scrapes it
+  # every 15 seconds. Grafana then queries Prometheus to render dashboards.
+  #
+  # Config file is bind-mounted from infrastructure/prometheus/prometheus.yml
+  # so you can edit scrape targets without rebuilding the container.
+  # --------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: patchpilot-prometheus
+    restart: unless-stopped
+    command:
+      # --web.enable-lifecycle: lets you reload config without restarting
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+      - "--storage.tsdb.retention.time=7d"
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      # Bind-mount: you can edit this file and POST /-/reload to apply changes
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - patchpilot-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # --------------------------------------------------------------------------
+  # Grafana — metrics visualization
+  #
+  # Why Grafana? It connects to Prometheus as a data source and renders the
+  # dashboards you'll show in the demo. Grafana OSS is 100% free.
+  #
+  # GF_SECURITY_ADMIN_PASSWORD: set a non-default password for the demo.
+  # GF_AUTH_ANONYMOUS_ENABLED: "true" lets the interviewer view dashboards
+  # without logging in — useful for a recorded demo.
+  # --------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: patchpilot-grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # Disable telemetry — no need to send usage data to Grafana Labs
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # Dashboard JSON files auto-provisioned on startup
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Provisioning: auto-registers Prometheus datasource on first start
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - patchpilot-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # --------------------------------------------------------------------------
+  # AI Agent — Week 2 (commented out until the Spring Boot app is written)
+  #
+  # Uncomment this block at the start of Week 2 Day 8 after:
+  #   1. ai-agent/ Spring Boot project is created
+  #   2. ai-agent/Dockerfile is written
+  #   3. .env has CLAUDE_API_KEY, GITHUB_TOKEN, etc.
+  # --------------------------------------------------------------------------
+  # ai-agent:
+  #   build:
+  #     context: ../ai-agent
+  #     dockerfile: Dockerfile
+  #   container_name: patchpilot-ai-agent
+  #   restart: unless-stopped
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   environment:
+  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-patchpilot}
+  #     SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-patchpilot}
+  #     SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+  #     CLAUDE_API_KEY: ${CLAUDE_API_KEY}
+  #     GITHUB_TOKEN: ${GITHUB_TOKEN}
+  #     GITHUB_OWNER: ${GITHUB_OWNER}
+  #     GITHUB_REPO: ${GITHUB_REPO}
+  #     SONARQUBE_URL: http://sonarqube:9000
+  #     SONARQUBE_TOKEN: ${SONARQUBE_TOKEN}
+  #     SONARQUBE_WEBHOOK_SECRET: ${SONARQUBE_WEBHOOK_SECRET}
+  #     AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+  #     AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+  #   ports:
+  #     - "${AI_AGENT_PORT:-8081}:8081"
+  #   networks:
+  #     - patchpilot-net
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -sf http://localhost:8081/actuator/health || exit 1"]
+  #     interval: 15s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+
+# ============================================================================
+# Named volumes — data persists across `docker compose down`
+# Destroy with: docker compose down -v  (nuclear option — fresh start)
+# ============================================================================
+volumes:
+  postgres-data:
+  jenkins-data:
+  sonarqube-data:
+  sonarqube-extensions:
+  sonarqube-logs:
+  artifactory-data:
+  prometheus-data:
+  grafana-data:
+
+# ============================================================================
+# Custom bridge network
+#
+# Why a custom network instead of the default?
+# 1. Service discovery: containers reach each other by service name (e.g.,
+#    http://sonarqube:9000) — this only works on user-defined bridge networks.
+# 2. Isolation: this network is invisible to other Docker projects on your machine.
+# ============================================================================
+networks:
+  patchpilot-net:
+    driver: bridge
