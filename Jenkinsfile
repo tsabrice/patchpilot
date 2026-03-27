@@ -67,14 +67,8 @@ pipeline {
             steps {
                 sh 'mvn -pl demo-app verify -B'
             }
-            post {
-                always {
-                    // Publish JUnit test results to the Jenkins build page.
-                    // allowEmptyResults: true prevents failure if no tests ran.
-                    junit allowEmptyResults: true,
-                          testResults: 'demo-app/target/surefire-reports/*.xml'
-                }
-            }
+            // Note: JUnit test result publishing requires the JUnit plugin.
+            // Install it from Manage Jenkins → Plugins if test trend graphs are needed.
         }
 
         // --------------------------------------------------------------------
