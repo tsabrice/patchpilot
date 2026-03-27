@@ -90,7 +90,7 @@ pipeline {
             steps {
                 withSonarQubeEnv('SonarQube') {
                     sh """
-                        mvn -pl demo-app sonar:sonar -B \
+                        mvn -f demo-app/pom.xml sonar:sonar -B \
                             -Dsonar.branch.name=${env.BRANCH_NAME ?: 'main'}
                     """
                 }
