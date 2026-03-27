@@ -27,10 +27,11 @@ pipeline {
     agent any
 
     tools {
-        // Tool names must match exactly what is configured in Jenkins
-        // Global Tool Configuration → Maven and JDK sections.
+        // Tool name must match exactly what is configured in Jenkins
+        // Global Tool Configuration → Maven installations.
+        // JDK is not declared here — the jenkins/jenkins:lts-jdk21 image
+        // ships with JDK 21 already on PATH, so no tool installation is needed.
         maven 'Maven-3.9'
-        jdk   'JDK-21'
     }
 
     environment {
