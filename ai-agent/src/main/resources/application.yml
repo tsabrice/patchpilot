@@ -76,6 +76,9 @@ resilience4j:
 claude:
   mode: ${CLAUDE_MODE:max}
   api-key: ${CLAUDE_API_KEY:}
+  # Model used when claude.mode=api.
+  # Override via CLAUDE_MODEL env var — e.g. set to claude-sonnet-4-6 for demo recording.
+  model: ${CLAUDE_MODEL:claude-haiku-4-5-20251001}
 
 github:
   token: ${GITHUB_TOKEN:}
