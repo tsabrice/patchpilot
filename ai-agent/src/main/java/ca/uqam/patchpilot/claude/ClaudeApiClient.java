@@ -119,6 +119,10 @@ public class ClaudeApiClient implements ClaudeClient {
                 .retrieve()
                 .body(MessagesResponse.class);
 
+        if (response == null) {
+            throw new RuntimeException("Claude API returned empty response for findingId: " + finding.getId());
+        }
+
         // content[0].text contains Claude's full text response
         var rawText = response.content().getFirst().text();
         log.debug("Claude raw response length: {} chars", rawText.length());

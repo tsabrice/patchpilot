@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 /**
@@ -124,9 +125,14 @@ public class GitHubApiClient {
                     .retrieve()
                     .body(GetFileResponse.class);
 
+            if (response == null) {
+                log.warn("GitHub returned empty body for file: path={} branch={}", filePath, branch);
+                return null;
+            }
+
             // GitHub encodes file content as base64 with line breaks every 60 chars.
             // MIME decoder handles those embedded newlines; standard decoder does not.
-            var decoded = new String(Base64.getMimeDecoder().decode(response.content()));
+            var decoded = new String(Base64.getMimeDecoder().decode(response.content()), StandardCharsets.UTF_8);
             log.debug("Fetched file: path={} sha={}", filePath, response.sha());
             return new FileContent(filePath, decoded, response.sha());
 
@@ -197,7 +203,7 @@ public class GitHubApiClient {
         log.debug("Committing file: path={} branch={}", filePath, branch);
 
         // PUT body requires base64-encoded content (standard encoding, no line breaks).
-        var encoded = Base64.getEncoder().encodeToString(patchedContent.getBytes());
+        var encoded = Base64.getEncoder().encodeToString(patchedContent.getBytes(StandardCharsets.UTF_8));
 
         restClient.put()
                 .uri("/repos/{owner}/{repo}/contents/{path}", owner, repo, filePath)
@@ -246,6 +252,9 @@ public class GitHubApiClient {
                 .retrieve()
                 .body(CreatePrResponse.class);
 
+        if (response == null) {
+            throw new RuntimeException("GitHub API returned empty response for PR creation: " + head);
+        }
         log.info("PR created: #{} — {}", response.number(), response.html_url());
         return new CreatedPr(response.number(), response.html_url());
     }
@@ -271,6 +280,9 @@ public class GitHubApiClient {
                         owner, repo, branch)
                 .retrieve()
                 .body(GetRefResponse.class);
+        if (response == null) {
+            throw new RuntimeException("GitHub API returned empty ref for branch: " + branch);
+        }
         return response.object().sha();
     }
 }

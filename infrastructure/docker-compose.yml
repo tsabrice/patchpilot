@@ -243,51 +243,46 @@ services:
       start_period: 30s
 
   # --------------------------------------------------------------------------
-  # AI Agent — uncomment when the Spring Boot application is ready (Week 2)
+  # AI Agent — Spring Boot service: SonarQube webhook → Claude API → GitHub PR
   #
-  # Prerequisites before uncommenting:
-  #   1. ai-agent/ Spring Boot project built and Dockerfile written
-  #   2. .env populated with GITHUB_TOKEN and related vars
-  #   3a. CLAUDE_MODE=max (default): claude CLI installed in the image +
-  #       ~/.claude/ mounted below for Max plan session credentials
-  #   3b. CLAUDE_MODE=api: set CLAUDE_API_KEY in .env instead
+  # CLAUDE_MODE=api: calls api.anthropic.com using CLAUDE_API_KEY (Docker default)
+  # CLAUDE_MODE=max: shells out to the claude CLI (requires CLI in image + ~/.claude mount)
+  # CLAUDE_MODEL: which Anthropic model to use (set in .env, defaults to haiku)
   # --------------------------------------------------------------------------
-  # ai-agent:
-  #   build:
-  #     context: ../ai-agent
-  #     dockerfile: Dockerfile
-  #   container_name: patchpilot-ai-agent
-  #   restart: unless-stopped
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   environment:
-  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-patchpilot}
-  #     SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-patchpilot}
-  #     SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-  #     CLAUDE_MODE: ${CLAUDE_MODE:-max}
-  #     CLAUDE_API_KEY: ${CLAUDE_API_KEY}   # only required when CLAUDE_MODE=api
-  #     GITHUB_TOKEN: ${GITHUB_TOKEN}
-  #     GITHUB_OWNER: ${GITHUB_OWNER}
-  #     GITHUB_REPO: ${GITHUB_REPO}
-  #     SONARQUBE_URL: http://sonarqube:9000
-  #     SONARQUBE_TOKEN: ${SONARQUBE_TOKEN}
-  #     SONARQUBE_WEBHOOK_SECRET: ${SONARQUBE_WEBHOOK_SECRET}
-  #     AUTH0_DOMAIN: ${AUTH0_DOMAIN}
-  #     AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
-  #   volumes:
-  #     # Mount Claude Max plan credentials (only needed when CLAUDE_MODE=max)
-  #     - ${HOME}/.claude:/root/.claude:ro
-  #   ports:
-  #     - "${AI_AGENT_PORT:-8081}:8081"
-  #   networks:
-  #     - patchpilot-net
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -sf http://localhost:8081/actuator/health || exit 1"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 30s
+  ai-agent:
+    build:
+      context: ../ai-agent
+      dockerfile: Dockerfile
+    container_name: patchpilot-ai-agent
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/patchpilot_agent
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-patchpilot}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      CLAUDE_MODE: api
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_OWNER: ${GITHUB_OWNER}
+      GITHUB_REPO: ${GITHUB_REPO}
+      SONARQUBE_URL: http://sonarqube:9000
+      SONARQUBE_TOKEN: ${SONARQUBE_TOKEN}
+      SONARQUBE_WEBHOOK_SECRET: ${SONARQUBE_WEBHOOK_SECRET}
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-placeholder.auth0.com}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://patchpilot-api}
+    ports:
+      - "${AI_AGENT_PORT:-8081}:8081"
+    networks:
+      - patchpilot-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
 
 # ============================================================================
 # Named volumes — data persists across `docker compose down`

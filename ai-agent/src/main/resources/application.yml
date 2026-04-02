@@ -23,14 +23,15 @@ spring:
     locations: classpath:db/migration
 
   # ── Auth0 JWT resource server ────────────────────────────────────────────────
-  # Spring auto-fetches Auth0's JWKS (public keys) from the issuer URI and
-  # validates every incoming JWT signature + expiry automatically.
-  # The webhook endpoint is excluded from JWT auth in SecurityConfig.
+  # jwk-set-uri (not issuer-uri) is intentional: Spring fetches the JWKS lazily
+  # — only when it needs to validate an incoming JWT, not at startup. This lets
+  # the app start and serve the webhook endpoint even when Auth0 is not yet
+  # configured (Week 2 smoke test). Auth0 is fully wired in Week 3.
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://${AUTH0_DOMAIN}/
+          jwk-set-uri: https://${AUTH0_DOMAIN:-placeholder.auth0.com}/.well-known/jwks.json
 
 # ── Server ──────────────────────────────────────────────────────────────────
 server:
