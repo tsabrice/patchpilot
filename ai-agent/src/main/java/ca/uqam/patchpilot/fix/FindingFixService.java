@@ -38,6 +38,7 @@ public class FindingFixService {
     private static final Logger log = LoggerFactory.getLogger(FindingFixService.class);
 
     private final SonarFindingRepository sonarFindingRepository;
+    private final PipelineRunRepository pipelineRunRepository;
     private final PipelineRunEventRepository pipelineRunEventRepository;
     private final AiGenerationRepository aiGenerationRepository;
     private final AiGenerationContentRepository aiGenerationContentRepository;
@@ -46,6 +47,7 @@ public class FindingFixService {
     private final ClaudeClient claudeClient;
 
     public FindingFixService(SonarFindingRepository sonarFindingRepository,
+                             PipelineRunRepository pipelineRunRepository,
                              PipelineRunEventRepository pipelineRunEventRepository,
                              AiGenerationRepository aiGenerationRepository,
                              AiGenerationContentRepository aiGenerationContentRepository,
@@ -53,6 +55,7 @@ public class FindingFixService {
                              GitHubApiClient gitHubApiClient,
                              ClaudeClient claudeClient) {
         this.sonarFindingRepository = sonarFindingRepository;
+        this.pipelineRunRepository = pipelineRunRepository;
         this.pipelineRunEventRepository = pipelineRunEventRepository;
         this.aiGenerationRepository = aiGenerationRepository;
         this.aiGenerationContentRepository = aiGenerationContentRepository;
@@ -200,20 +203,48 @@ public class FindingFixService {
             log.info("Fix task completed — findingId={} PR=#{} url={}",
                     findingId, createdPr.prNumber(), createdPr.prUrl());
 
+            finaliseRunIfAllDone(run);
+
         } catch (Exception e) {
             log.error("Fix task failed — findingId={}", findingId, e);
-            // Write the failure status and an audit event before giving up.
-            // The finding stays in FAILED — the crash-recovery poller will NOT
-            // re-queue FAILED findings (only non-terminal ones).
             finding.setPipelineStatus(FindingPipelineStatus.FAILED);
             sonarFindingRepository.save(finding);
             appendEvent(run, finding.getId(), "FINDING_FAILED",
                     "{\"error\":\"%s\"}"
                             .formatted(sanitiseForJson(e.getMessage())));
+
+            finaliseRunIfAllDone(run);
         }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Called after every finding reaches a terminal state (COMPLETED/FAILED/SKIPPED).
+     * If all findings for the run are now terminal, marks the run COMPLETED or FAILED
+     * and appends a PIPELINE_COMPLETED/PIPELINE_FAILED audit event.
+     *
+     * Concurrent-safe: multiple @Async threads call this simultaneously for the last
+     * few findings. The allFindingsTerminal() query is the authoritative check —
+     * only one thread will see it return true, and the run status update is idempotent.
+     */
+    private void finaliseRunIfAllDone(PipelineRun run) {
+        if (!sonarFindingRepository.allFindingsTerminal(run.getId())) {
+            return; // other findings still in flight
+        }
+        var runToUpdate = pipelineRunRepository.findById(run.getId()).orElse(null);
+        if (runToUpdate == null || runToUpdate.getStatus() != PipelineRunStatus.IN_PROGRESS) {
+            return; // already finalised by another thread
+        }
+        boolean anyFailed = sonarFindingRepository.anyFindingFailed(run.getId());
+        var finalStatus = anyFailed ? PipelineRunStatus.FAILED : PipelineRunStatus.COMPLETED;
+        runToUpdate.setStatus(finalStatus);
+        runToUpdate.setFinishedAt(java.time.OffsetDateTime.now());
+        pipelineRunRepository.save(runToUpdate);
+        pipelineRunEventRepository.save(new PipelineRunEvent(runToUpdate,
+                anyFailed ? "PIPELINE_FAILED" : "PIPELINE_COMPLETED"));
+        log.info("Run {} finalised as {}", run.getId(), finalStatus);
+    }
 
     /** Updates pipelineStatus and immediately persists it. */
     private void setStatus(SonarFinding finding, FindingPipelineStatus status) {
