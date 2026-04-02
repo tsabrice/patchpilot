@@ -1,6 +1,8 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import { AuthService } from '@auth0/auth0-angular';
+import { filter, take } from 'rxjs';
 
 import { RunsService } from './runs.service';
 import { PipelineRunSummary, RunStatus } from '../shared/api.types';
@@ -12,6 +14,7 @@ import { PipelineRunSummary, RunStatus } from '../shared/api.types';
 })
 export class RunListComponent implements OnInit {
   private readonly runsService = inject(RunsService);
+  private readonly auth = inject(AuthService);
 
   runs = signal<PipelineRunSummary[]>([]);
   loading = signal(true);
@@ -21,7 +24,14 @@ export class RunListComponent implements OnInit {
   readonly pageSize = 20;
 
   ngOnInit() {
-    this.loadPage(0);
+    // Wait for the Auth0 SDK to finish processing the callback and store the
+    // access token before making any API calls. Without this, the interceptor
+    // calls getTokenSilently() before the token is available and sends the
+    // request without an Authorization header, causing a 401.
+    this.auth.isAuthenticated$.pipe(
+      filter(authenticated => authenticated),
+      take(1),
+    ).subscribe(() => this.loadPage(0));
   }
 
   loadPage(page: number) {

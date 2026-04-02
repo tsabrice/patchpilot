@@ -165,10 +165,17 @@ public class FindingFixService {
             appendEvent(run, findingId, "BRANCH_CREATED",
                     "{\"branch\":\"%s\"}".formatted(branchName));
 
+            // Re-fetch the file SHA from the fix branch. If a previous pipeline
+            // run already committed a fix there, the file's SHA on that branch
+            // differs from the SHA fetched from main above. Passing the stale
+            // main SHA to updateFile() causes GitHub to return 409 Conflict.
+            var branchFile = gitHubApiClient.getFileContent(filePath, branchName);
+            var fileSha = branchFile != null ? branchFile.sha() : fileContent.sha();
+
             var commitMessage = "fix: address %s in %s [PatchPilot]"
                     .formatted(finding.getRuleKey(), filePath);
             gitHubApiClient.updateFile(
-                    filePath, fixResult.patchedContent(), fileContent.sha(), branchName, commitMessage);
+                    filePath, fixResult.patchedContent(), fileSha, branchName, commitMessage);
 
             // Use Claude's bilingual titles and bodies for the PR.
             var titleEn = fixResult.titleEn();

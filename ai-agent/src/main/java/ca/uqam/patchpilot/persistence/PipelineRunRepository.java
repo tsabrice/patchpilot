@@ -13,11 +13,13 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, Long> 
     Optional<PipelineRun> findBySonarTaskId(String sonarTaskId);
 
     /**
-     * Paginated run list with aggregate counts computed in a single query.
+     * Paginated run list with aggregate counts computed via scalar subqueries.
      *
-     * Why LEFT JOIN + COUNT(DISTINCT): a run may have zero findings (if SonarQube
-     * found nothing), so LEFT JOIN prevents those runs from disappearing from the list.
-     * DISTINCT avoids double-counting when multiple JOINs are in play.
+     * Why subqueries instead of JOINs?
+     * Joining SonarFinding (sf) and AiGeneration (ag) both directly to PipelineRun
+     * produces an sf×ag cross-product (10×10=100 rows per run), causing SUM() on
+     * GithubPr to overcount. Scalar subqueries each execute once per run row and
+     * return a single value — no cross-product, no GROUP BY needed.
      *
      * openPrsCount: only GithubPr rows with status PR_OPEN count — closed/merged PRs
      * are excluded so the dashboard shows current open PR count, not lifetime count.
@@ -30,15 +32,13 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, Long> 
                 pr.branch,
                 pr.startedAt,
                 pr.finishedAt,
-                COUNT(DISTINCT sf.id),
-                COUNT(DISTINCT ag.id),
-                SUM(CASE WHEN gp.status = ca.uqam.patchpilot.persistence.GithubPrStatus.PR_OPEN THEN 1L ELSE 0L END)
+                (SELECT COUNT(sf) FROM SonarFinding sf WHERE sf.run.id = pr.id),
+                (SELECT COUNT(ag) FROM AiGeneration ag WHERE ag.run.id = pr.id),
+                (SELECT COUNT(gp) FROM GithubPr gp
+                    WHERE gp.generation.run.id = pr.id
+                    AND gp.status = ca.uqam.patchpilot.persistence.GithubPrStatus.PR_OPEN)
             )
             FROM PipelineRun pr
-            LEFT JOIN SonarFinding sf ON sf.run.id = pr.id
-            LEFT JOIN AiGeneration ag ON ag.run.id = pr.id
-            LEFT JOIN GithubPr gp ON gp.generation.id = ag.id
-            GROUP BY pr.id, pr.status, pr.projectKey, pr.branch, pr.startedAt, pr.finishedAt
             ORDER BY pr.startedAt DESC
             """)
     Page<RunSummaryDto> findAllSummaries(Pageable pageable);
