@@ -67,6 +67,11 @@ services:
     image: jenkins/jenkins:lts-jdk21
     container_name: patchpilot-jenkins
     restart: unless-stopped
+    # UQAM's campus DNS does not forward external lookups from Docker containers.
+    # Override with Google's public DNS so Jenkins can reach GitHub, Maven Central, etc.
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     environment:
       JAVA_OPTS: >-
         -Djenkins.install.runSetupWizard=false
@@ -109,6 +114,9 @@ services:
     image: sonarqube:community
     container_name: patchpilot-sonarqube
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       postgres:
         condition: service_healthy
@@ -245,9 +253,11 @@ services:
   # --------------------------------------------------------------------------
   # AI Agent — Spring Boot service: SonarQube webhook → Claude API → GitHub PR
   #
-  # CLAUDE_MODE=api: calls api.anthropic.com using CLAUDE_API_KEY (Docker default)
-  # CLAUDE_MODE=max: shells out to the claude CLI (requires CLI in image + ~/.claude mount)
-  # CLAUDE_MODEL: which Anthropic model to use (set in .env, defaults to haiku)
+  # CLAUDE_MODE=max  (default): shells out to the `claude` CLI, which uses your
+  #   Max subscription session stored in ~/.claude on the host. No API credits.
+  # CLAUDE_MODE=api: calls api.anthropic.com with CLAUDE_API_KEY. Use this for
+  #   Azure Container Apps (no CLI session available there).
+  # CLAUDE_MODEL: model used only in api mode (set in .env, defaults to haiku).
   # --------------------------------------------------------------------------
   ai-agent:
     build:
@@ -255,6 +265,9 @@ services:
       dockerfile: Dockerfile
     container_name: patchpilot-ai-agent
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       postgres:
         condition: service_healthy
@@ -262,7 +275,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/patchpilot_agent
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-patchpilot}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      CLAUDE_MODE: api
+      # Read CLAUDE_MODE from .env — defaults to max (CLI / Max subscription)
+      CLAUDE_MODE: ${CLAUDE_MODE:-max}
       CLAUDE_API_KEY: ${CLAUDE_API_KEY}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
@@ -273,6 +287,11 @@ services:
       SONARQUBE_WEBHOOK_SECRET: ${SONARQUBE_WEBHOOK_SECRET}
       AUTH0_DOMAIN: ${AUTH0_DOMAIN:-placeholder.auth0.com}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://patchpilot-api}
+    volumes:
+      # Mount host ~/.claude into the container so the Max plan session is
+      # available to the claude CLI. Writable so the CLI can refresh its
+      # session token without failing mid-pipeline.
+      - ${HOME}/.claude:/root/.claude
     ports:
       - "${AI_AGENT_PORT:-8081}:8081"
     networks:

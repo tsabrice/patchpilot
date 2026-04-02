@@ -24,7 +24,7 @@ public interface WebhookEventRepository extends JpaRepository<WebhookEvent, Long
     @Modifying
     @Query(value = """
             INSERT INTO webhook_events (sonar_task_id, raw_payload, status)
-            VALUES (:taskId, :payload::jsonb, 'PENDING')
+            VALUES (:taskId, CAST(:payload AS jsonb), 'PENDING')
             ON CONFLICT (sonar_task_id) DO NOTHING
             """, nativeQuery = true)
     int insertIfAbsent(@Param("taskId") String taskId, @Param("payload") String payload);

@@ -1,6 +1,8 @@
 package ca.uqam.patchpilot.persistence;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 
 /**
@@ -38,6 +40,9 @@ public class PipelineRunEvent {
     private String eventType;
 
     // Optional JSON context: {"durationMs": 4200, "prUrl": "...", "errorMsg": "..."}
+    // @JdbcTypeCode tells Hibernate 6 to bind this String as JSON, not varchar —
+    // without it Hibernate sends the value as character varying and PostgreSQL rejects it.
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private String payload;
 

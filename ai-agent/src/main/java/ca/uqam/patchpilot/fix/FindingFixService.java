@@ -142,8 +142,9 @@ public class FindingFixService {
 
             // Persist the patched file in the vertical partition table.
             // Kept separate from ai_generations to avoid bloating the hot query path.
-            aiGenerationContentRepository.save(
-                    new AiGenerationContent(generation, fixResult.patchedContent()));
+            // Uses a native INSERT — see AiGenerationContentRepository for why.
+            aiGenerationContentRepository.insertContent(
+                    generation.getId(), fixResult.patchedContent());
 
             appendEvent(run, findingId, "CLAUDE_CALLED",
                     "{\"promptTokens\":%d,\"completionTokens\":%d,\"confidence\":%.3f}"
