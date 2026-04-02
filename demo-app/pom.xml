@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        demo-app — intentionally vulnerable Spring Boot application.
+        This is the app that SonarQube scans and PatchPilot fixes.
+        It has no real business logic — only OWASP Top 10 vulnerabilities
+        planted specifically to trigger SonarQube rules.
+    -->
+
+    <parent>
+        <groupId>ca.uqam</groupId>
+        <artifactId>patchpilot-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>demo-app</artifactId>
+    <name>PatchPilot Demo App</name>
+    <description>Intentionally vulnerable Spring Boot app for SonarQube scanning</description>
+
+    <dependencies>
+
+        <!-- Web layer — REST endpoints that demonstrate the vulnerabilities -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!--
+            JPA + PostgreSQL — needed to demonstrate SQL injection vulnerabilities.
+            The vulnerable code will use raw string concatenation in queries
+            instead of parameterised queries, which SonarQube flags as java:S2077.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- H2 for local dev/test — avoids needing a real DB to run the demo app -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                Spring Boot Maven Plugin — packages the app as an executable JAR.
+                mvn package → target/demo-app-1.0.0-SNAPSHOT.jar
+                mvn spring-boot:run → runs the app locally
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+                SonarQube Maven Plugin — used by Jenkins:  mvn sonar:sonar
+                The projectKey must match exactly what is configured in SonarQube.
+                sonar.host.url and sonar.token come from Jenkins environment variables
+                injected by withSonarQubeEnv() in the Jenkinsfile.
+            -->
+            <plugin>
+                <groupId>org.sonarsource.scanner.maven</groupId>
+                <artifactId>sonar-maven-plugin</artifactId>
+                <version>4.0.0.4121</version>
+            </plugin>
+
+        </plugins>
+    </build>
+
+    <!--
+        Distribution management — tells mvn deploy where to publish the JAR.
+        Repository IDs (artifactory-releases, artifactory-snapshots) must match
+        the <server> IDs in the Maven settings.xml that Jenkins injects at deploy time.
+        The hostnames use Docker service names — valid inside the patchpilot-net network.
+    -->
+    <distributionManagement>
+        <repository>
+            <id>artifactory-releases</id>
+            <url>http://artifactory:8082/artifactory/libs-release-local</url>
+        </repository>
+        <snapshotRepository>
+            <id>artifactory-snapshots</id>
+            <url>http://artifactory:8082/artifactory/libs-snapshot-local</url>
+        </snapshotRepository>
+    </distributionManagement>
+
+    <!-- SonarQube project configuration — read by mvn sonar:sonar -->
+    <properties>
+        <sonar.projectKey>demo-app</sonar.projectKey>
+        <sonar.projectName>PatchPilot Demo App</sonar.projectName>
+    </properties>
+
+</project>

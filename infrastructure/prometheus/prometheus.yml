@@ -1,0 +1,62 @@
+# ============================================================================
+# Prometheus scrape configuration for PatchPilot
+#
+# How Prometheus works:
+#   Prometheus is a pull-based system — it reaches out to each target on a
+#   schedule and fetches metrics from its /metrics endpoint. The pull model
+#   means Prometheus controls the scrape interval and targets can be added
+#   or removed without changing application code.
+#
+# To reload this config without restarting the container:
+#   curl -X POST http://localhost:9090/-/reload
+# ============================================================================
+
+global:
+  # How often Prometheus scrapes each target by default
+  scrape_interval: 15s
+  # How often Prometheus evaluates alerting rules
+  evaluation_interval: 15s
+  # Labels added to every time series scraped by this instance
+  external_labels:
+    project: patchpilot
+    env: local
+
+scrape_configs:
+
+  # --------------------------------------------------------------------------
+  # Prometheus scrapes itself — useful for monitoring Prometheus's own health
+  # and resource usage.
+  # --------------------------------------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # --------------------------------------------------------------------------
+  # AI Agent — Spring Boot Actuator + Micrometer
+  #
+  # Spring Boot auto-configures a /actuator/prometheus endpoint when the
+  # micrometer-registry-prometheus dependency is present and the endpoint is
+  # exposed via management.endpoints.web.exposure.include in application.yml.
+  #
+  # The target uses the Docker service name (ai-agent:8081) because Prometheus
+  # runs inside the same Docker network as the AI Agent.
+  #
+  # Uncomment when the AI Agent container is running (Week 2).
+  # --------------------------------------------------------------------------
+  # - job_name: ai-agent
+  #   metrics_path: /actuator/prometheus
+  #   static_configs:
+  #     - targets: ["ai-agent:8081"]
+  #       labels:
+  #         service: ai-agent
+
+  # --------------------------------------------------------------------------
+  # Jenkins — requires the "Prometheus metrics" plugin installed via the
+  # Jenkins plugin manager. Uncomment after installing the plugin.
+  # --------------------------------------------------------------------------
+  # - job_name: jenkins
+  #   metrics_path: /prometheus
+  #   static_configs:
+  #     - targets: ["jenkins:8080"]
+  #       labels:
+  #         service: jenkins

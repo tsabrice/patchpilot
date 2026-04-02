@@ -1,0 +1,26 @@
+# ============================================================================
+# Grafana datasource provisioning
+#
+# This file is read by Grafana on startup and automatically registers
+# Prometheus as a data source — no manual UI configuration required.
+#
+# How Grafana provisioning works:
+#   Grafana watches /etc/grafana/provisioning/ on startup and processes
+#   any YAML files it finds. This makes the setup reproducible — anyone
+#   who runs `docker compose up` gets a pre-configured Grafana with no
+#   manual steps.
+# ============================================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    # "default: true" means this datasource is pre-selected in new panels
+    isDefault: true
+    url: http://prometheus:9090
+    access: proxy
+    # proxy = Grafana backend fetches from Prometheus (recommended)
+    # direct = browser fetches directly (CORS issues, avoid this)
+    jsonData:
+      timeInterval: 15s
