@@ -195,10 +195,13 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
 
-            <!-- SpotBugs — inherited config from parent pluginManagement -->
+            <!-- SpotBugs — base config from parent; add exclusion filter here -->
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
+                <configuration>
+                    <excludeFilterFile>spotbugs-exclude.xml</excludeFilterFile>
+                </configuration>
             </plugin>
 
             <!-- OWASP Dependency Check — inherited config from parent pluginManagement -->

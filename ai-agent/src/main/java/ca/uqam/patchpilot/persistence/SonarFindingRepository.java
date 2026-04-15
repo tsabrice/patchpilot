@@ -36,4 +36,27 @@ public interface SonarFindingRepository extends JpaRepository<SonarFinding, Long
            " ca.uqam.patchpilot.persistence.FindingPipelineStatus.FAILED, " +
            " ca.uqam.patchpilot.persistence.FindingPipelineStatus.SKIPPED)")
     List<SonarFinding> findAllActive();
+
+    /**
+     * Returns true when every finding for this run is in a terminal state.
+     * Used by FindingFixService to detect when a run is fully done and mark
+     * the PipelineRun status accordingly.
+     */
+    @Query("""
+            SELECT COUNT(f) = 0
+            FROM SonarFinding f
+            WHERE f.run.id = :runId
+            AND f.pipelineStatus NOT IN (
+                ca.uqam.patchpilot.persistence.FindingPipelineStatus.COMPLETED,
+                ca.uqam.patchpilot.persistence.FindingPipelineStatus.FAILED,
+                ca.uqam.patchpilot.persistence.FindingPipelineStatus.SKIPPED
+            )
+            """)
+    boolean allFindingsTerminal(@Param("runId") Long runId);
+
+    /** True if any finding for this run ended in FAILED. */
+    @Query("SELECT COUNT(f) > 0 FROM SonarFinding f WHERE f.run.id = :runId AND f.pipelineStatus = ca.uqam.patchpilot.persistence.FindingPipelineStatus.FAILED")
+    boolean anyFindingFailed(@Param("runId") Long runId);
+
+    long countByPipelineStatus(FindingPipelineStatus pipelineStatus);
 }

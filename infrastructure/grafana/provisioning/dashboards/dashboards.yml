@@ -1,0 +1,24 @@
+# ============================================================================
+# Grafana dashboard provisioning
+#
+# Tells Grafana to load dashboard JSON files from /var/lib/grafana/dashboards
+# (which is bind-mounted from infrastructure/grafana/dashboards/ in compose).
+#
+# updateIntervalSeconds: Grafana re-reads the folder every 30s — edit the JSON
+# and it reloads automatically without restarting the container.
+#
+# allowUiUpdates: false keeps the provisioned dashboard read-only in the UI,
+# so accidental edits don't overwrite the committed JSON. Set to true locally
+# when iterating on dashboard design.
+# ============================================================================
+
+apiVersion: 1
+
+providers:
+  - name: PatchPilot
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

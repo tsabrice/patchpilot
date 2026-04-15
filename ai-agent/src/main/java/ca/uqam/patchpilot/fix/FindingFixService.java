@@ -3,6 +3,9 @@ package ca.uqam.patchpilot.fix;
 import ca.uqam.patchpilot.claude.ClaudeClient;
 import ca.uqam.patchpilot.github.GitHubApiClient;
 import ca.uqam.patchpilot.persistence.*;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -38,6 +41,7 @@ public class FindingFixService {
     private static final Logger log = LoggerFactory.getLogger(FindingFixService.class);
 
     private final SonarFindingRepository sonarFindingRepository;
+    private final PipelineRunRepository pipelineRunRepository;
     private final PipelineRunEventRepository pipelineRunEventRepository;
     private final AiGenerationRepository aiGenerationRepository;
     private final AiGenerationContentRepository aiGenerationContentRepository;
@@ -45,20 +49,61 @@ public class FindingFixService {
     private final GitHubApiClient gitHubApiClient;
     private final ClaudeClient claudeClient;
 
+    // ── Micrometer metrics ────────────────────────────────────────────────────
+    //
+    // MeterRegistry is the Micrometer facade — the prometheus dependency on the
+    // classpath wires it to PrometheusMeterRegistry automatically.
+    //
+    // patchpilot.pipeline.runs  — counter per finalised run, tagged by status
+    // patchpilot.findings       — counter per terminal finding, tagged by status
+    // patchpilot.confidence     — distribution summary of Claude confidence scores
+    //   Prometheus will expose: patchpilot_confidence_count, _sum, _max
+    //   Mean = patchpilot_confidence_sum / patchpilot_confidence_count (PromQL)
+    private final Counter runsCompletedCounter;
+    private final Counter runsFailedCounter;
+    private final Counter findingsCompletedCounter;
+    private final Counter findingsFailedCounter;
+    private final Counter findingsSkippedCounter;
+    private final DistributionSummary confidenceSummary;
+
     public FindingFixService(SonarFindingRepository sonarFindingRepository,
+                             PipelineRunRepository pipelineRunRepository,
                              PipelineRunEventRepository pipelineRunEventRepository,
                              AiGenerationRepository aiGenerationRepository,
                              AiGenerationContentRepository aiGenerationContentRepository,
                              GithubPrRepository githubPrRepository,
                              GitHubApiClient gitHubApiClient,
-                             ClaudeClient claudeClient) {
+                             ClaudeClient claudeClient,
+                             MeterRegistry meterRegistry) {
         this.sonarFindingRepository = sonarFindingRepository;
+        this.pipelineRunRepository = pipelineRunRepository;
         this.pipelineRunEventRepository = pipelineRunEventRepository;
         this.aiGenerationRepository = aiGenerationRepository;
         this.aiGenerationContentRepository = aiGenerationContentRepository;
         this.githubPrRepository = githubPrRepository;
         this.gitHubApiClient = gitHubApiClient;
         this.claudeClient = claudeClient;
+
+        // Counters use the "status" tag so a single PromQL query can sum or
+        // filter by status. Tag values are lowercase to match Prometheus conventions.
+        this.runsCompletedCounter  = Counter.builder("patchpilot.pipeline.runs")
+                .tag("status", "completed").register(meterRegistry);
+        this.runsFailedCounter     = Counter.builder("patchpilot.pipeline.runs")
+                .tag("status", "failed").register(meterRegistry);
+        this.findingsCompletedCounter = Counter.builder("patchpilot.findings")
+                .tag("status", "completed").register(meterRegistry);
+        this.findingsFailedCounter    = Counter.builder("patchpilot.findings")
+                .tag("status", "failed").register(meterRegistry);
+        this.findingsSkippedCounter   = Counter.builder("patchpilot.findings")
+                .tag("status", "skipped").register(meterRegistry);
+
+        // DistributionSummary records each confidence score (0.0–1.0).
+        // Prometheus exposes _count, _sum, and _max — use _sum/_count for mean.
+        this.confidenceSummary = DistributionSummary.builder("patchpilot.confidence")
+                .description("Claude fix confidence score (0.0–1.0)")
+                .minimumExpectedValue(0.001)  // Micrometer requires > 0
+                .maximumExpectedValue(1.0)
+                .register(meterRegistry);
     }
 
     /**
@@ -111,6 +156,7 @@ public class FindingFixService {
                 log.warn("Source file not found on GitHub — skipping: path={} findingId={}",
                         filePath, findingId);
                 setStatus(finding, FindingPipelineStatus.SKIPPED);
+                findingsSkippedCounter.increment();
                 appendEvent(run, findingId, "FINDING_SKIPPED",
                         "{\"reason\":\"file_not_found\",\"path\":\"%s\"}".formatted(filePath));
                 return;
@@ -140,10 +186,15 @@ public class FindingFixService {
                     BigDecimal.valueOf(fixResult.confidence()).setScale(3, RoundingMode.HALF_UP));
             aiGenerationRepository.save(generation);
 
+            // Record the confidence score in the distribution summary so Grafana
+            // can show mean/max confidence across all generations over time.
+            confidenceSummary.record(fixResult.confidence());
+
             // Persist the patched file in the vertical partition table.
             // Kept separate from ai_generations to avoid bloating the hot query path.
-            aiGenerationContentRepository.save(
-                    new AiGenerationContent(generation, fixResult.patchedContent()));
+            // Uses a native INSERT — see AiGenerationContentRepository for why.
+            aiGenerationContentRepository.insertContent(
+                    generation.getId(), fixResult.patchedContent());
 
             appendEvent(run, findingId, "CLAUDE_CALLED",
                     "{\"promptTokens\":%d,\"completionTokens\":%d,\"confidence\":%.3f}"
@@ -161,10 +212,17 @@ public class FindingFixService {
             appendEvent(run, findingId, "BRANCH_CREATED",
                     "{\"branch\":\"%s\"}".formatted(branchName));
 
+            // Re-fetch the file SHA from the fix branch. If a previous pipeline
+            // run already committed a fix there, the file's SHA on that branch
+            // differs from the SHA fetched from main above. Passing the stale
+            // main SHA to updateFile() causes GitHub to return 409 Conflict.
+            var branchFile = gitHubApiClient.getFileContent(filePath, branchName);
+            var fileSha = branchFile != null ? branchFile.sha() : fileContent.sha();
+
             var commitMessage = "fix: address %s in %s [PatchPilot]"
                     .formatted(finding.getRuleKey(), filePath);
             gitHubApiClient.updateFile(
-                    filePath, fixResult.patchedContent(), fileContent.sha(), branchName, commitMessage);
+                    filePath, fixResult.patchedContent(), fileSha, branchName, commitMessage);
 
             // Use Claude's bilingual titles and bodies for the PR.
             var titleEn = fixResult.titleEn();
@@ -192,6 +250,7 @@ public class FindingFixService {
 
             // ── Done ──────────────────────────────────────────────────────────
             setStatus(finding, FindingPipelineStatus.COMPLETED);
+            findingsCompletedCounter.increment();
             appendEvent(run, findingId, "FINDING_COMPLETED",
                     "{\"prNumber\":%d,\"prUrl\":\"%s\"}"
                             .formatted(createdPr.prNumber(), createdPr.prUrl()));
@@ -199,20 +258,53 @@ public class FindingFixService {
             log.info("Fix task completed — findingId={} PR=#{} url={}",
                     findingId, createdPr.prNumber(), createdPr.prUrl());
 
+            finaliseRunIfAllDone(run);
+
         } catch (Exception e) {
             log.error("Fix task failed — findingId={}", findingId, e);
-            // Write the failure status and an audit event before giving up.
-            // The finding stays in FAILED — the crash-recovery poller will NOT
-            // re-queue FAILED findings (only non-terminal ones).
             finding.setPipelineStatus(FindingPipelineStatus.FAILED);
             sonarFindingRepository.save(finding);
+            findingsFailedCounter.increment();
             appendEvent(run, finding.getId(), "FINDING_FAILED",
                     "{\"error\":\"%s\"}"
                             .formatted(sanitiseForJson(e.getMessage())));
+
+            finaliseRunIfAllDone(run);
         }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Called after every finding reaches a terminal state (COMPLETED/FAILED/SKIPPED).
+     * If all findings for the run are now terminal, marks the run COMPLETED or FAILED
+     * and appends a PIPELINE_COMPLETED/PIPELINE_FAILED audit event.
+     *
+     * Concurrent-safe: multiple @Async threads call this simultaneously for the last
+     * few findings. The allFindingsTerminal() query is the authoritative check —
+     * only one thread will see it return true, and the run status update is idempotent.
+     */
+    private void finaliseRunIfAllDone(PipelineRun run) {
+        if (!sonarFindingRepository.allFindingsTerminal(run.getId())) {
+            return; // other findings still in flight
+        }
+        var runToUpdate = pipelineRunRepository.findById(run.getId()).orElse(null);
+        if (runToUpdate == null || runToUpdate.getStatus() != PipelineRunStatus.IN_PROGRESS) {
+            return; // already finalised by another thread
+        }
+        boolean anyFailed = sonarFindingRepository.anyFindingFailed(run.getId());
+        var finalStatus = anyFailed ? PipelineRunStatus.FAILED : PipelineRunStatus.COMPLETED;
+        runToUpdate.setStatus(finalStatus);
+        runToUpdate.setFinishedAt(java.time.OffsetDateTime.now());
+        pipelineRunRepository.save(runToUpdate);
+        pipelineRunEventRepository.save(new PipelineRunEvent(runToUpdate,
+                anyFailed ? "PIPELINE_FAILED" : "PIPELINE_COMPLETED"));
+        log.info("Run {} finalised as {}", run.getId(), finalStatus);
+
+        // Increment the run counter so Grafana can chart runs over time.
+        if (anyFailed) runsFailedCounter.increment();
+        else runsCompletedCounter.increment();
+    }
 
     /** Updates pipelineStatus and immediately persists it. */
     private void setStatus(SonarFinding finding, FindingPipelineStatus status) {

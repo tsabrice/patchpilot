@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+
+    <!--
+        EI_EXPOSE_REP / EI_EXPOSE_REP2 — JPA entities
+
+        JPA entities must hold direct object references (not defensive copies) so
+        that Hibernate can swap in its proxy objects at runtime. Defensive copying
+        would silently break lazy loading and dirty-checking. This is a well-known
+        false-positive category for JPA code in SpotBugs.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+        <Package name="ca.uqam.patchpilot.persistence"/>
+    </Match>
+
+    <!--
+        EI_EXPOSE_REP2 — Spring-managed singletons stored in service/controller fields
+
+        Spring injects singletons (ObjectMapper, repository beans, service beans) into
+        components via constructor injection. Defensive copying would break the injection
+        contract — the injected instance must be the exact Spring-managed proxy, not a copy.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Package name="ca.uqam.patchpilot.webhook"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Package name="ca.uqam.patchpilot.claude"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+        <Package name="ca.uqam.patchpilot.fix"/>
+    </Match>
+
+    <!--
+        VA_FORMAT_STRING_USES_NEWLINE — Java text blocks
+
+        SpotBugs 4.8.6 incorrectly flags Java text blocks (""" ... """) that call
+        .formatted() as using \n instead of %n. Text blocks use real newline characters
+        (not \n escape sequences) so the warning does not apply.
+        See: https://github.com/spotbugs/spotbugs/issues/2352
+    -->
+    <Match>
+        <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
+        <Package name="ca.uqam.patchpilot.github"/>
+    </Match>
+    <Match>
+        <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
+        <Package name="ca.uqam.patchpilot.claude"/>
+    </Match>
+
+</FindBugsFilter>

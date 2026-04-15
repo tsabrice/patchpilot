@@ -1,0 +1,157 @@
+<div class="min-h-screen bg-gray-50">
+
+  <!-- Header with nav -->
+  <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold text-gray-900">PatchPilot</h1>
+      <p class="text-sm text-gray-500">Automated security fix pipeline</p>
+    </div>
+    <nav class="flex items-center gap-1">
+      <a routerLink="/runs"
+         class="px-3 py-1.5 rounded-md text-sm text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors">
+        Runs
+      </a>
+      <a routerLink="/stats"
+         class="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-900">
+        Stats
+      </a>
+    </nav>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8 space-y-6">
+
+    <!-- Loading -->
+    @if (loading()) {
+      <div class="flex items-center justify-center py-24 text-gray-400">
+        <svg class="animate-spin h-6 w-6 mr-3" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        Loading stats…
+      </div>
+    }
+
+    <!-- Error -->
+    @if (error()) {
+      <div class="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+        {{ error() }}
+      </div>
+    }
+
+    @if (!loading() && !error() && stats()) {
+
+      <!-- Summary cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+        <!-- Total Runs -->
+        <div class="bg-white rounded-xl border border-gray-200 px-6 py-5">
+          <p class="text-xs uppercase tracking-wide text-gray-400 font-medium">Total Runs</p>
+          <p class="mt-2 text-3xl font-bold text-gray-900">{{ stats()!.totalRuns }}</p>
+          <p class="mt-1 text-xs text-gray-400">
+            @if (runSuccessRate(stats()!) !== null) {
+              <span class="text-green-600 font-medium">{{ runSuccessRate(stats()!) | number:'1.0-0' }}% success rate</span>
+              · {{ stats()!.failedRuns }} failed
+            } @else {
+              No runs yet
+            }
+          </p>
+        </div>
+
+        <!-- Findings Fixed -->
+        <div class="bg-white rounded-xl border border-gray-200 px-6 py-5">
+          <p class="text-xs uppercase tracking-wide text-gray-400 font-medium">Findings Fixed</p>
+          <p class="mt-2 text-3xl font-bold text-gray-900">{{ stats()!.fixedFindings }}</p>
+          <p class="mt-1 text-xs text-gray-400">
+            @if (fixRate(stats()!) !== null) {
+              <span class="text-green-600 font-medium">{{ fixRate(stats()!) | number:'1.0-1' }}% fix rate</span>
+              · {{ stats()!.totalFindings }} total findings
+            } @else {
+              No findings yet
+            }
+          </p>
+        </div>
+
+        <!-- Open PRs -->
+        <div class="bg-white rounded-xl border border-gray-200 px-6 py-5">
+          <p class="text-xs uppercase tracking-wide text-gray-400 font-medium">Open PRs</p>
+          <p class="mt-2 text-3xl font-bold
+                     {{ stats()!.openPrs > 0 ? 'text-green-600' : 'text-gray-900' }}">
+            {{ stats()!.openPrs }}
+          </p>
+          <p class="mt-1 text-xs text-gray-400">security fixes awaiting review</p>
+        </div>
+
+        <!-- Avg Confidence -->
+        <div class="bg-white rounded-xl border border-gray-200 px-6 py-5">
+          <p class="text-xs uppercase tracking-wide text-gray-400 font-medium">Avg Confidence</p>
+          <p class="mt-2 text-3xl font-bold
+                     {{ stats()!.avgConfidence !== null && stats()!.avgConfidence! >= 0.8
+                          ? 'text-green-600'
+                          : stats()!.avgConfidence !== null && stats()!.avgConfidence! >= 0.5
+                            ? 'text-amber-600'
+                            : 'text-gray-900' }}">
+            {{ avgConfidencePct(stats()!) }}
+          </p>
+          <p class="mt-1 text-xs text-gray-400">across all AI generations</p>
+        </div>
+
+      </div>
+
+      <!-- Run breakdown table -->
+      <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100">
+          <h2 class="text-sm font-medium text-gray-700">Run Breakdown</h2>
+        </div>
+        <div class="divide-y divide-gray-100">
+
+          <div class="px-6 py-3 flex items-center justify-between text-sm">
+            <span class="text-gray-500">Completed</span>
+            <div class="flex items-center gap-3">
+              <div class="w-40 h-2 rounded-full bg-gray-100 overflow-hidden">
+                @if (stats()!.totalRuns > 0) {
+                  <div class="h-full rounded-full bg-green-400"
+                       [style.width.%]="(stats()!.completedRuns / stats()!.totalRuns) * 100">
+                  </div>
+                }
+              </div>
+              <span class="w-8 text-right font-medium text-gray-800">{{ stats()!.completedRuns }}</span>
+            </div>
+          </div>
+
+          <div class="px-6 py-3 flex items-center justify-between text-sm">
+            <span class="text-gray-500">Failed</span>
+            <div class="flex items-center gap-3">
+              <div class="w-40 h-2 rounded-full bg-gray-100 overflow-hidden">
+                @if (stats()!.totalRuns > 0) {
+                  <div class="h-full rounded-full bg-red-400"
+                       [style.width.%]="(stats()!.failedRuns / stats()!.totalRuns) * 100">
+                  </div>
+                }
+              </div>
+              <span class="w-8 text-right font-medium text-gray-800">{{ stats()!.failedRuns }}</span>
+            </div>
+          </div>
+
+          <div class="px-6 py-3 flex items-center justify-between text-sm">
+            <span class="text-gray-500">In progress / Pending</span>
+            <div class="flex items-center gap-3">
+              <div class="w-40 h-2 rounded-full bg-gray-100 overflow-hidden">
+                @if (stats()!.totalRuns > 0) {
+                  <div class="h-full rounded-full bg-blue-400"
+                       [style.width.%]="((stats()!.totalRuns - stats()!.completedRuns - stats()!.failedRuns) / stats()!.totalRuns) * 100">
+                  </div>
+                }
+              </div>
+              <span class="w-8 text-right font-medium text-gray-800">
+                {{ stats()!.totalRuns - stats()!.completedRuns - stats()!.failedRuns }}
+              </span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    }
+
+  </main>
+</div>

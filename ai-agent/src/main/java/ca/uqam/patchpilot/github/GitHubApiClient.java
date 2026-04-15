@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 /**
@@ -72,6 +73,9 @@ public class GitHubApiClient {
     /** Fields from POST /repos/.../pulls response that we persist. */
     private record CreatePrResponse(int number, String html_url) {}
 
+    /** One entry from GET /repos/.../pulls list — only fields we need. */
+    private record PrListItem(int number, String html_url) {}
+
     // ── Public return types ───────────────────────────────────────────────────
 
     /**
@@ -124,9 +128,14 @@ public class GitHubApiClient {
                     .retrieve()
                     .body(GetFileResponse.class);
 
+            if (response == null) {
+                log.warn("GitHub returned empty body for file: path={} branch={}", filePath, branch);
+                return null;
+            }
+
             // GitHub encodes file content as base64 with line breaks every 60 chars.
             // MIME decoder handles those embedded newlines; standard decoder does not.
-            var decoded = new String(Base64.getMimeDecoder().decode(response.content()));
+            var decoded = new String(Base64.getMimeDecoder().decode(response.content()), StandardCharsets.UTF_8);
             log.debug("Fetched file: path={} sha={}", filePath, response.sha());
             return new FileContent(filePath, decoded, response.sha());
 
@@ -197,7 +206,7 @@ public class GitHubApiClient {
         log.debug("Committing file: path={} branch={}", filePath, branch);
 
         // PUT body requires base64-encoded content (standard encoding, no line breaks).
-        var encoded = Base64.getEncoder().encodeToString(patchedContent.getBytes());
+        var encoded = Base64.getEncoder().encodeToString(patchedContent.getBytes(StandardCharsets.UTF_8));
 
         restClient.put()
                 .uri("/repos/{owner}/{repo}/contents/{path}", owner, repo, filePath)
@@ -240,14 +249,29 @@ public class GitHubApiClient {
                 %s
                 """.formatted(bodyEn, bodyFr);
 
-        var response = restClient.post()
-                .uri("/repos/{owner}/{repo}/pulls", owner, repo)
-                .body(new CreatePrRequest(titleEn + " | " + titleFr, combinedBody, head, base))
-                .retrieve()
-                .body(CreatePrResponse.class);
+        try {
+            var response = restClient.post()
+                    .uri("/repos/{owner}/{repo}/pulls", owner, repo)
+                    .body(new CreatePrRequest(titleEn + " | " + titleFr, combinedBody, head, base))
+                    .retrieve()
+                    .body(CreatePrResponse.class);
 
-        log.info("PR created: #{} — {}", response.number(), response.html_url());
-        return new CreatedPr(response.number(), response.html_url());
+            if (response == null) {
+                throw new RuntimeException("GitHub API returned empty response for PR creation: " + head);
+            }
+            log.info("PR created: #{} — {}", response.number(), response.html_url());
+            return new CreatedPr(response.number(), response.html_url());
+
+        } catch (HttpClientErrorException e) {
+            // 422 = a PR already exists for this head → base pair. This happens
+            // when the pipeline re-runs for the same finding (crash recovery or
+            // repeated Jenkins builds). Fetch the existing PR rather than failing.
+            if (e.getStatusCode() == HttpStatus.UNPROCESSABLE_ENTITY) {
+                log.info("PR already exists for branch {} — fetching existing PR", head);
+                return findExistingPullRequest(head, base);
+            }
+            throw e;
+        }
     }
 
     public CreatedPr createPullRequestFallback(String head, String base,
@@ -261,6 +285,23 @@ public class GitHubApiClient {
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /**
+     * Finds an open PR whose head branch matches. Called when createPullRequest()
+     * receives 422 (PR already exists). Returns the first matching open PR.
+     */
+    private CreatedPr findExistingPullRequest(String head, String base) {
+        var prs = restClient.get()
+                .uri("/repos/{owner}/{repo}/pulls?head={owner}:{head}&base={base}&state=open",
+                        owner, repo, owner, head, base)
+                .retrieve()
+                .body(PrListItem[].class);
+        if (prs != null && prs.length > 0) {
+            log.info("Found existing PR: #{} — {}", prs[0].number(), prs[0].html_url());
+            return new CreatedPr(prs[0].number(), prs[0].html_url());
+        }
+        throw new RuntimeException("PR already exists for branch " + head + " but could not be found via list endpoint");
+    }
+
+    /**
      * Returns the HEAD commit SHA of a branch by reading its ref.
      * Called internally by createBranch() — not exposed publicly because
      * callers have no use for the raw SHA.
@@ -271,6 +312,9 @@ public class GitHubApiClient {
                         owner, repo, branch)
                 .retrieve()
                 .body(GetRefResponse.class);
+        if (response == null) {
+            throw new RuntimeException("GitHub API returned empty ref for branch: " + branch);
+        }
         return response.object().sha();
     }
 }

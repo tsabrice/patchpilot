@@ -40,15 +40,13 @@ scrape_configs:
   #
   # The target uses the Docker service name (ai-agent:8081) because Prometheus
   # runs inside the same Docker network as the AI Agent.
-  #
-  # Uncomment when the AI Agent container is running (Week 2).
   # --------------------------------------------------------------------------
-  # - job_name: ai-agent
-  #   metrics_path: /actuator/prometheus
-  #   static_configs:
-  #     - targets: ["ai-agent:8081"]
-  #       labels:
-  #         service: ai-agent
+  - job_name: ai-agent
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ai-agent:8081"]
+        labels:
+          service: ai-agent
 
   # --------------------------------------------------------------------------
   # Jenkins — requires the "Prometheus metrics" plugin installed via the

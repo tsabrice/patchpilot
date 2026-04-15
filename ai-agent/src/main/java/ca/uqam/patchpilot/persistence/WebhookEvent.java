@@ -1,6 +1,8 @@
 package ca.uqam.patchpilot.persistence;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 
 /**
@@ -31,8 +33,10 @@ public class WebhookEvent {
     private WebhookEventStatus status = WebhookEventStatus.PENDING;
 
     // columnDefinition = "jsonb" tells Hibernate to create a jsonb column.
+    // @JdbcTypeCode(JSON) tells Hibernate 6 to bind this String as JSON, not varchar.
     // The value is stored and retrieved as a plain String — Hibernate does
     // not parse it, so the raw SonarQube payload is preserved exactly.
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "raw_payload", nullable = false, columnDefinition = "jsonb")
     private String rawPayload;
 

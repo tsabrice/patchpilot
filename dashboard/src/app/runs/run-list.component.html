@@ -1,0 +1,126 @@
+<div class="min-h-screen bg-gray-50">
+
+  <!-- Header with nav -->
+  <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold text-gray-900">PatchPilot</h1>
+      <p class="text-sm text-gray-500">Automated security fix pipeline</p>
+    </div>
+    <nav class="flex items-center gap-1">
+      <a routerLink="/runs"
+         class="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-900">
+        Runs
+      </a>
+      <a routerLink="/stats"
+         class="px-3 py-1.5 rounded-md text-sm text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors">
+        Stats
+      </a>
+    </nav>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8">
+
+    <!-- Loading -->
+    @if (loading()) {
+      <div class="flex items-center justify-center py-24 text-gray-400">
+        <svg class="animate-spin h-6 w-6 mr-3" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        Loading runs…
+      </div>
+    }
+
+    <!-- Error -->
+    @if (error()) {
+      <div class="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+        {{ error() }}
+      </div>
+    }
+
+    <!-- Table -->
+    @if (!loading() && !error()) {
+      <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+
+        <!-- Summary bar -->
+        <div class="px-6 py-3 border-b border-gray-100 flex items-center justify-between">
+          <span class="text-sm text-gray-500">
+            {{ totalElements() }} run{{ totalElements() !== 1 ? 's' : '' }} total
+          </span>
+        </div>
+
+        @if (runs().length === 0) {
+          <p class="px-6 py-12 text-center text-sm text-gray-400">
+            No pipeline runs yet. Push a commit to trigger the pipeline.
+          </p>
+        } @else {
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs uppercase text-gray-500 tracking-wide">
+              <tr>
+                <th class="px-6 py-3 text-left">Run</th>
+                <th class="px-6 py-3 text-left">Project / Branch</th>
+                <th class="px-6 py-3 text-left">Status</th>
+                <th class="px-6 py-3 text-right">Findings</th>
+                <th class="px-6 py-3 text-right">Fixes</th>
+                <th class="px-6 py-3 text-right">PRs open</th>
+                <th class="px-6 py-3 text-left">Started</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              @for (run of runs(); track run.id) {
+                <tr class="hover:bg-gray-50 cursor-pointer transition-colors"
+                    [routerLink]="['/runs', run.id]">
+                  <td class="px-6 py-4 font-mono text-gray-500">#{{ run.id }}</td>
+                  <td class="px-6 py-4">
+                    <span class="font-medium text-gray-900">{{ run.projectKey }}</span>
+                    <span class="ml-2 text-xs text-gray-400 font-mono">{{ run.branch }}</span>
+                  </td>
+                  <td class="px-6 py-4">
+                    <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
+                                 {{ statusClass(run.status) }}">
+                      {{ run.status }}
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-right text-gray-700">{{ run.findingsCount }}</td>
+                  <td class="px-6 py-4 text-right text-gray-700">{{ run.generationsCount }}</td>
+                  <td class="px-6 py-4 text-right">
+                    @if (run.openPrsCount > 0) {
+                      <span class="font-semibold text-green-600">{{ run.openPrsCount }}</span>
+                    } @else {
+                      <span class="text-gray-400">0</span>
+                    }
+                  </td>
+                  <td class="px-6 py-4 text-gray-500">
+                    {{ run.startedAt | date:'MMM d, HH:mm' }}
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+
+          <!-- Pagination -->
+          @if (totalPages() > 1) {
+            <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between text-sm text-gray-500">
+              <span>Page {{ currentPage() + 1 }} of {{ totalPages() }}</span>
+              <div class="flex gap-2">
+                <button
+                  class="px-3 py-1 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  [disabled]="currentPage() === 0"
+                  (click)="loadPage(currentPage() - 1)">
+                  Previous
+                </button>
+                <button
+                  class="px-3 py-1 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  [disabled]="currentPage() === totalPages() - 1"
+                  (click)="loadPage(currentPage() + 1)">
+                  Next
+                </button>
+              </div>
+            </div>
+          }
+        }
+      </div>
+    }
+
+  </main>
+</div>
