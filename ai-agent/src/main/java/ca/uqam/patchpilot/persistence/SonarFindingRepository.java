@@ -57,4 +57,6 @@ public interface SonarFindingRepository extends JpaRepository<SonarFinding, Long
     /** True if any finding for this run ended in FAILED. */
     @Query("SELECT COUNT(f) > 0 FROM SonarFinding f WHERE f.run.id = :runId AND f.pipelineStatus = ca.uqam.patchpilot.persistence.FindingPipelineStatus.FAILED")
     boolean anyFindingFailed(@Param("runId") Long runId);
+
+    long countByPipelineStatus(FindingPipelineStatus pipelineStatus);
 }

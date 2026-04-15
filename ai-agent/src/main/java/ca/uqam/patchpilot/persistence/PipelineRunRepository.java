@@ -42,4 +42,7 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, Long> 
             ORDER BY pr.startedAt DESC
             """)
     Page<RunSummaryDto> findAllSummaries(Pageable pageable);
+
+    // Spring Data JPA derives these from the method name — no @Query needed.
+    long countByStatus(PipelineRunStatus status);
 }
