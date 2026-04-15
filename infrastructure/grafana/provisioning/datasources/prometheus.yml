@@ -16,7 +16,6 @@ apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
-    # "default: true" means this datasource is pre-selected in new panels
     isDefault: true
     url: http://prometheus:9090
     access: proxy
