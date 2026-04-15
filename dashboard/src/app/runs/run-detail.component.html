@@ -1,0 +1,194 @@
+<div class="min-h-screen bg-gray-50">
+
+  <!-- Header with back link and nav -->
+  <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <a routerLink="/runs"
+         class="text-sm text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        All runs
+      </a>
+      <span class="text-gray-300">|</span>
+      <div>
+        <h1 class="text-xl font-semibold text-gray-900">PatchPilot</h1>
+        <p class="text-sm text-gray-500">Automated security fix pipeline</p>
+      </div>
+    </div>
+    <nav class="flex items-center gap-1">
+      <a routerLink="/runs"
+         class="px-3 py-1.5 rounded-md text-sm text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors">
+        Runs
+      </a>
+      <a routerLink="/stats"
+         class="px-3 py-1.5 rounded-md text-sm text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors">
+        Stats
+      </a>
+    </nav>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8 space-y-6">
+
+    <!-- Loading -->
+    @if (loading()) {
+      <div class="flex items-center justify-center py-24 text-gray-400">
+        <svg class="animate-spin h-6 w-6 mr-3" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        Loading run details…
+      </div>
+    }
+
+    <!-- Error -->
+    @if (error()) {
+      <div class="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+        {{ error() }}
+      </div>
+    }
+
+    @if (!loading() && !error() && run()) {
+
+      <!-- Run header card -->
+      <div class="bg-white rounded-xl border border-gray-200 px-6 py-5">
+        <div class="flex items-start justify-between">
+          <div>
+            <div class="flex items-center gap-3">
+              <span class="text-lg font-mono font-semibold text-gray-700">#{{ run()!.id }}</span>
+              <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
+                           {{ runStatusClass(run()!.status) }}">
+                {{ run()!.status }}
+              </span>
+            </div>
+            <p class="mt-1 text-sm text-gray-600">
+              <span class="font-medium text-gray-800">{{ run()!.projectKey }}</span>
+              <span class="ml-2 font-mono text-gray-400">{{ run()!.branch }}</span>
+            </p>
+          </div>
+
+          <!-- Timestamps -->
+          <div class="text-right text-xs text-gray-400 space-y-1">
+            <p>Started {{ run()!.startedAt | date:'MMM d, yyyy HH:mm' }}</p>
+            @if (run()!.finishedAt) {
+              <p>Finished {{ run()!.finishedAt | date:'MMM d, yyyy HH:mm' }}</p>
+            } @else {
+              <p class="text-blue-400">In progress…</p>
+            }
+            @if (run()!.commitSha) {
+              <p class="font-mono">{{ run()!.commitSha!.slice(0, 7) }}</p>
+            }
+          </div>
+        </div>
+      </div>
+
+      <!-- Findings table -->
+      <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+
+        <div class="px-6 py-3 border-b border-gray-100">
+          <span class="text-sm font-medium text-gray-700">
+            {{ run()!.findings.length }} finding{{ run()!.findings.length !== 1 ? 's' : '' }}
+          </span>
+        </div>
+
+        @if (run()!.findings.length === 0) {
+          <p class="px-6 py-12 text-center text-sm text-gray-400">
+            No findings recorded for this run.
+          </p>
+        } @else {
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs uppercase text-gray-500 tracking-wide">
+              <tr>
+                <th class="px-6 py-3 text-left">Finding</th>
+                <th class="px-6 py-3 text-left">Severity</th>
+                <th class="px-6 py-3 text-left">Pipeline</th>
+                <th class="px-6 py-3 text-right">Confidence</th>
+                <th class="px-6 py-3 text-left">Pull Request</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              @for (finding of run()!.findings; track finding.id) {
+                <tr class="hover:bg-gray-50 transition-colors">
+
+                  <!-- Finding: rule key + file + message -->
+                  <td class="px-6 py-4 max-w-xs">
+                    <p class="font-mono text-xs text-gray-500">{{ finding.ruleKey }}</p>
+                    <p class="font-medium text-gray-800 truncate" [title]="finding.component">
+                      {{ shortComponent(finding.component) }}
+                      @if (finding.line) {
+                        <span class="ml-1 text-gray-400">:{{ finding.line }}</span>
+                      }
+                    </p>
+                    <p class="text-xs text-gray-500 truncate mt-0.5" [title]="finding.message">
+                      {{ finding.message }}
+                    </p>
+                  </td>
+
+                  <!-- Severity badge -->
+                  <td class="px-6 py-4">
+                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+                                 {{ severityClass(finding.severity) }}">
+                      {{ finding.severity }}
+                    </span>
+                  </td>
+
+                  <!-- Pipeline status badge -->
+                  <td class="px-6 py-4">
+                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+                                 {{ findingStatusClass(finding.pipelineStatus) }}">
+                      {{ finding.pipelineStatus }}
+                    </span>
+                  </td>
+
+                  <!-- Confidence score -->
+                  <td class="px-6 py-4 text-right font-mono text-sm">
+                    @if (finding.confidenceScore !== null) {
+                      <span [class]="finding.confidenceScore >= 0.8
+                            ? 'text-green-600 font-semibold'
+                            : finding.confidenceScore >= 0.5
+                              ? 'text-amber-600'
+                              : 'text-red-500'">
+                        {{ confidenceLabel(finding.confidenceScore) }}
+                      </span>
+                    } @else {
+                      <span class="text-gray-300">—</span>
+                    }
+                  </td>
+
+                  <!-- PR link -->
+                  <td class="px-6 py-4">
+                    @if (finding.prUrl) {
+                      <a [href]="finding.prUrl"
+                         target="_blank"
+                         rel="noopener noreferrer"
+                         class="inline-flex items-center gap-1 text-xs font-medium
+                                rounded-full px-2.5 py-0.5
+                                {{ isPrOpen(finding.prStatus)
+                                   ? 'bg-green-50 text-green-700 hover:bg-green-100'
+                                   : 'bg-gray-100 text-gray-500 hover:bg-gray-200' }}
+                                transition-colors">
+                        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z"/>
+                        </svg>
+                        PR #{{ finding.prNumber }}
+                        <span class="opacity-60">· {{ finding.prStatus }}</span>
+                      </a>
+                    } @else if (finding.pipelineStatus === 'FAILED') {
+                      <span class="text-xs text-red-400">Failed</span>
+                    } @else if (finding.pipelineStatus === 'SKIPPED') {
+                      <span class="text-xs text-gray-400">Skipped</span>
+                    } @else {
+                      <span class="text-xs text-gray-300">Pending</span>
+                    }
+                  </td>
+
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+      </div>
+    }
+
+  </main>
+</div>

@@ -1,12 +1,21 @@
 <div class="min-h-screen bg-gray-50">
 
-  <!-- Header -->
+  <!-- Header with nav -->
   <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
     <div>
       <h1 class="text-xl font-semibold text-gray-900">PatchPilot</h1>
       <p class="text-sm text-gray-500">Automated security fix pipeline</p>
     </div>
-    <span class="text-sm text-gray-400">Pipeline Runs</span>
+    <nav class="flex items-center gap-1">
+      <a routerLink="/runs"
+         class="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-900">
+        Runs
+      </a>
+      <a routerLink="/stats"
+         class="px-3 py-1.5 rounded-md text-sm text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors">
+        Stats
+      </a>
+    </nav>
   </header>
 
   <main class="max-w-6xl mx-auto px-6 py-8">

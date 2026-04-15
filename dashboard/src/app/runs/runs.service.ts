@@ -3,7 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../environments/environment';
-import { PageResponse, PipelineRunSummary } from '../shared/api.types';
+import { PageResponse, PipelineRunSummary, RunDetail } from '../shared/api.types';
 
 @Injectable({ providedIn: 'root' })
 export class RunsService {
@@ -16,5 +16,9 @@ export class RunsService {
       .set('size', size)
       .set('sort', 'startedAt,desc');
     return this.http.get<PageResponse<PipelineRunSummary>>(this.base, { params });
+  }
+
+  getById(id: number): Observable<RunDetail> {
+    return this.http.get<RunDetail>(`${this.base}/${id}`);
   }
 }

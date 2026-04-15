@@ -13,12 +13,17 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./runs/run-list.component').then(m => m.RunListComponent),
   },
-  // Placeholder for run detail — Day 17
   {
     path: 'runs/:id',
     canActivate: [authGuard],
     loadComponent: () =>
-      import('./runs/run-list.component').then(m => m.RunListComponent),
+      import('./runs/run-detail.component').then(m => m.RunDetailComponent),
+  },
+  {
+    path: 'stats',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./stats/stats.component').then(m => m.StatsComponent),
   },
   {
     path: '**',
